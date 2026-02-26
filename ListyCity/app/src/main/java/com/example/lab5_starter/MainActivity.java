@@ -1,15 +1,22 @@
 package com.example.lab5_starter;
 
 import android.os.Bundle;
+import android.util.Log;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.ListView;
 
 import androidx.activity.EdgeToEdge;
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
+
+import com.google.firebase.firestore.CollectionReference;
+import com.google.firebase.firestore.DocumentReference;
+import com.google.firebase.firestore.FirebaseFirestore;
+import com.google.firebase.firestore.QueryDocumentSnapshot;
 
 import java.util.ArrayList;
 
@@ -20,6 +27,11 @@ public class MainActivity extends AppCompatActivity implements CityDialogFragmen
 
     private ArrayList<City> cityArrayList;
     private ArrayAdapter<City> cityArrayAdapter;
+
+    private FirebaseFirestore db;
+
+    private CollectionReference citiesRef;
+
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -41,7 +53,26 @@ public class MainActivity extends AppCompatActivity implements CityDialogFragmen
         cityArrayAdapter = new CityArrayAdapter(this, cityArrayList);
         cityListView.setAdapter(cityArrayAdapter);
 
-        addDummyData();
+        db = FirebaseFirestore.getInstance();
+        citiesRef = db.collection("cities");
+
+        citiesRef.addSnapshotListener((value, error) -> {
+            if (error != null) {
+                Log.e("Firestore", error.toString());
+                return;
+            }
+
+            cityArrayList.clear();
+            if (value != null) {
+                for (QueryDocumentSnapshot snapshot : value) {
+                    String name = snapshot.getString("name");
+                    String province = snapshot.getString("province");
+                    City city = new City(name, province);
+                    cityArrayList.add(city);
+                }
+            }
+            cityArrayAdapter.notifyDataSetChanged();
+        });
 
         // set listeners
         addCityButton.setOnClickListener(view -> {
@@ -53,6 +84,22 @@ public class MainActivity extends AppCompatActivity implements CityDialogFragmen
             City city = cityArrayAdapter.getItem(i);
             CityDialogFragment cityDialogFragment = CityDialogFragment.newInstance(city);
             cityDialogFragment.show(getSupportFragmentManager(),"City Details");
+        });
+
+        cityListView.setOnItemLongClickListener((parent, view, position, id) -> {
+            City city = cityArrayAdapter.getItem(position);
+            if (city == null) {
+                return true;
+            }
+
+            new AlertDialog.Builder(this)
+                    .setTitle("Delete City")
+                    .setMessage("Delete " + city.getName() + ", " + city.getProvince() + "?")
+                    .setNegativeButton("Cancel", null)
+                    .setPositiveButton("Delete", (dialog, which) -> deleteCityFromFirestore(city))
+                    .show();
+
+            return true;
         });
 
     }
@@ -71,6 +118,26 @@ public class MainActivity extends AppCompatActivity implements CityDialogFragmen
         cityArrayList.add(city);
         cityArrayAdapter.notifyDataSetChanged();
 
+        DocumentReference docRef =citiesRef.document(city.getName());
+        docRef.set(city);
+
+    }
+
+    @Override
+    public void deleteCity(City city) {
+        deleteCityFromFirestore(city);
+    }
+
+    private void deleteCityFromFirestore(City city) {
+        citiesRef.whereEqualTo("name", city.getName())
+                .whereEqualTo("province", city.getProvince())
+                .get()
+                .addOnSuccessListener(query -> {
+                    for (QueryDocumentSnapshot snapshot : query) {
+                        snapshot.getReference().delete();
+                    }
+                })
+                .addOnFailureListener(e -> Log.e("Firestore", "Delete failed", e));
     }
 
     public void addDummyData(){
